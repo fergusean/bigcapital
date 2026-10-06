@@ -1,44 +1,37 @@
-# This workflow will build a docker container, publish it to Github Registry.
-name: Build and Deploy Develop Docker Container
+name: Build Fork Images
+
 on:
   push:
     branches:
       - develop
+  workflow_dispatch:
 
-env:
-  WEBAPP_IMAGE_NAME: bigcapitalhq/webapp
-  SERVER_IMAGE_NAME: bigcapitalhq/server
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: fork-images-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  build-publish-webapp:
+  build-publish:
+    name: Build and publish ${{ matrix.component }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
     strategy:
       fail-fast: false
-    name: Build and deploy webapp container
-    runs-on: ubuntu-latest
-    environment: production
-    permissions:
-      contents: read
-      packages: write
+      matrix:
+        component:
+          - server
+          - webapp
     steps:
-      - name: Prepare
-        run: |
-          platform=${{ matrix.platform }}
-          echo "PLATFORM_PAIR=${platform//\//-}" >> $GITHUB_ENV
-
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # Login to Container registry.
-      - name: Log in to the Container registry
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
-
-      # Login to GitHub Container Registry.
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
         with:
@@ -46,104 +39,32 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata (tags, labels) for Docker
+      - name: Image metadata
         id: meta
-        uses: docker/metadata-action@98669ae865ea3cffbcbaa878cf57c20bbf1c6c38
+        uses: docker/metadata-action@v5
         with:
-          images: ${{ env.WEBAPP_IMAGE_NAME }}
+          images: ghcr.io/${{ github.repository }}/${{ matrix.component }}
+          tags: |
+            type=raw,value=${{ github.sha }}
+            type=raw,value=develop,enable=${{ github.ref == 'refs/heads/develop' }}
 
-      # Builds and push the Docker image.
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v5
+      - name: Build and push image
         id: build
+        uses: docker/build-push-action@v5
         with:
-          context: ./
-          file: ./packages/webapp/Dockerfile
+          context: .
+          file: packages/${{ matrix.component }}/Dockerfile
           platforms: linux/amd64
           push: true
+          tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          tags: bigcapitalhq/webapp:develop, ghcr.io/bigcapitalhq/bigcapital/webapp:develop
+          cache-from: type=gha,scope=${{ matrix.component }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.component }}
 
-      - name: Export digest
-        run: |
-          mkdir -p /tmp/digests
-          digest="${{ steps.build.outputs.digest }}"
-          touch "/tmp/digests/${digest#sha256:}"
-
-      - name: Upload digest
-        uses: actions/upload-artifact@v4
-        with:
-          name: digests-webapp
-          path: /tmp/digests/*
-          if-no-files-found: error
-          retention-days: 1
-      # Send notification to Slack channel.
-      - name: Slack Notification built and published webapp container successfully.
-        uses: rtCamp/action-slack-notify@v2
+      - name: Record immutable image reference
         env:
-          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
-
-  build-publish-server:
-    name: Build and deploy server container
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - name: Prepare
+          IMAGE: ghcr.io/${{ github.repository }}/${{ matrix.component }}
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
         run: |
-          platform=${{ matrix.platform }}
-          echo "PLATFORM_PAIR=${platform//\//-}" >> $GITHUB_ENV
-
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      # Login to Container registry.
-      - name: Log in to the Container registry
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
-
-      # Login to GitHub Container Registry.
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      # Builds and push the Docker image.
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v5
-        id: build
-        with:
-          context: ./
-          file: ./packages/server/Dockerfile
-          platforms: linux/amd64
-          push: true
-          tags: bigcapitalhq/server:develop, ghcr.io/bigcapitalhq/bigcapital/server:develop
-          labels: ${{ steps.meta.outputs.labels }}
-
-      - name: Export digest
-        run: |
-          mkdir -p /tmp/digests
-          digest="${{ steps.build.outputs.digest }}"
-          touch "/tmp/digests/${digest#sha256:}"
-
-      - name: Upload digest
-        uses: actions/upload-artifact@v4
-        with:
-          name: digests-server
-          path: /tmp/digests/*
-          if-no-files-found: error
-          retention-days: 1
-
-      # Send notification to Slack channel.
-      - name: Slack Notification built and published server container successfully.
-        uses: rtCamp/action-slack-notify@v2
-        env:
-          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+          echo "### ${{ matrix.component }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`$IMAGE:${{ github.sha }}@$IMAGE_DIGEST\`" >> "$GITHUB_STEP_SUMMARY"
