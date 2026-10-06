@@ -2,7 +2,7 @@ import * as path from 'path';
 import { registerAs } from '@nestjs/config';
 
 export default registerAs('tenantDatabase', () => ({
-  client: 'mysql',
+  client: 'mysql2',
   host: process.env.TENANT_DB_HOST || process.env.DB_HOST,
   port: process.env.TENANT_DB_PORT || process.env.DB_PORT || 3306,
   user: process.env.TENANT_DB_USER || process.env.DB_USER,

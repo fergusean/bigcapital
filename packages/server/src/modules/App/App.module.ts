@@ -1,5 +1,6 @@
 import { MiddlewareConsumer, Module, RequestMethod } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { RedisOptions } from 'ioredis';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { APP_GUARD, APP_INTERCEPTOR, APP_PIPE, APP_FILTER } from '@nestjs/core';
 import { join } from 'path';
@@ -143,10 +144,8 @@ import { AppThrottleModule } from './AppThrottle.module';
     BullModule.forRootAsync({
       imports: [ConfigModule],
       useFactory: async (configService: ConfigService) => ({
-        connection: {
-          host: configService.get('queue.host'),
-          port: configService.get('queue.port'),
-        },
+        connection: configService.get<RedisOptions>('queue.connection'),
+        prefix: configService.get<string>('queue.prefix'),
       }),
       inject: [ConfigService],
     }),
@@ -182,10 +181,7 @@ import { AppThrottleModule } from './AppThrottle.module';
     RedisModule.forRootAsync({
       imports: [ConfigModule],
       useFactory: (configService: ConfigService) => ({
-        config: {
-          host: configService.get('redis.host'),
-          port: configService.get('redis.port'),
-        },
+        config: configService.get<RedisOptions>('redis'),
       }),
       inject: [ConfigService],
     }),

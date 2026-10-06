@@ -15,7 +15,66 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  compatibility:
+    name: Check shared datastore compatibility
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    services:
+      mysql:
+        image: mysql:8.4.10
+        env:
+          MYSQL_ROOT_PASSWORD: ci-only-root-password
+          MYSQL_ROOT_HOST: '%'
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost -pci-only-root-password"
+          --health-interval=5s --health-timeout=5s --health-retries=30
+      redis:
+        image: redis:7.4-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=5s --health-timeout=5s --health-retries=10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '18.16.0'
+      - name: Install focused check dependencies
+        run: |
+          npm install --prefix "$RUNNER_TEMP/bigcapital-check" --ignore-scripts --no-audit --no-fund \
+            typescript@5.6.3 @nestjs/common@10.4.7 @nestjs/core@10.4.7 \
+            @nestjs/config@3.3.0 @nestjs/throttler@6.2.1 \
+            @nest-lab/throttler-storage-redis@1.1.0 bullmq@5.25.6 \
+            ioredis@5.6.0 mysql2@3.11.3 knex@3.1.0
+      - name: Start authenticated test Sentinel
+        run: |
+          cat > "$RUNNER_TEMP/bigcapital-sentinel.conf" <<'CONF'
+          port 26379
+          bind 0.0.0.0
+          protected-mode yes
+          user default off
+          user sentinel-client on >ci-only-sentinel-password +@all ~* &*
+          sentinel monitor redis 127.0.0.1 6379 1
+          CONF
+          chmod 666 "$RUNNER_TEMP/bigcapital-sentinel.conf"
+          docker run --detach --name bigcapital-test-sentinel --network host \
+            --mount "type=bind,source=$RUNNER_TEMP/bigcapital-sentinel.conf,target=/etc/redis/sentinel.conf" \
+            redis:7.4-alpine redis-server /etc/redis/sentinel.conf --sentinel
+      - name: Verify MySQL authentication and scoped Redis consumers
+        env:
+          NODE_PATH: ${{ runner.temp }}/bigcapital-check/node_modules
+        run: node scripts/check-shared-datastores.cjs
+      - name: Clean up test Sentinel
+        if: always()
+        run: docker rm --force bigcapital-test-sentinel
+
   build-publish:
+    needs: compatibility
     name: Build and publish ${{ matrix.component }}
     runs-on: ubuntu-latest
     timeout-minutes: 60

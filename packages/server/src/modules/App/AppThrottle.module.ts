@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { ThrottlerStorageRedisService } from '@nest-lab/throttler-storage-redis';
+import { RedisOptions } from 'ioredis';
 
 @Module({
   imports: [
@@ -32,11 +33,6 @@ import { ThrottlerStorageRedisService } from '@nest-lab/throttler-storage-redis'
           };
         }
 
-        const host = configService.get<string>('redis.host') || 'localhost';
-        const port = Number(configService.get<number>('redis.port') || 6379);
-        const password = configService.get<string>('redis.password');
-        const db = configService.get<number>('redis.db');
-
         const globalTtl = configService.get<number>('throttle.global.ttl');
         const globalLimit = configService.get<number>('throttle.global.limit');
         const authTtl = configService.get<number>('throttle.auth.ttl');
@@ -55,12 +51,9 @@ import { ThrottlerStorageRedisService } from '@nest-lab/throttler-storage-redis'
               limit: authLimit,
             },
           ],
-          storage: new ThrottlerStorageRedisService({
-            host,
-            port,
-            password,
-            db,
-          }),
+          storage: new ThrottlerStorageRedisService(
+            configService.get<RedisOptions>('redis'),
+          ),
         };
       },
     }),

@@ -1,6 +1,11 @@
 import { registerAs } from '@nestjs/config';
+import { redisConnectionOptions } from './redis-connection';
 
 export default registerAs('queue', () => ({
-  host: process.env.QUEUE_HOST || 'localhost',
-  port: parseInt(process.env.QUEUE_PORT, 10) || 6379,
+  connection: {
+    ...redisConnectionOptions('QUEUE'),
+    maxRetriesPerRequest: null,
+  },
+  // BullMQ requires its own prefix rather than ioredis's keyPrefix.
+  prefix: process.env.QUEUE_PREFIX || 'bull',
 }));
